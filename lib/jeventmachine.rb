@@ -274,6 +274,48 @@ module EventMachine
   end
   def self.send_file_data(sig, filename)
   end
+  
+  def self.jwatch_file(filename, handler=nil, *args)
+    java_import java.nio.file.Path
+    java_import java.nio.file.Paths
+    java_import java.nio.file.StandardWatchEventKinds
+    java_import java.nio.file.WatchEvent
+    java_import java.nio.file.WatchKey
+    java_import java.nio.file.WatchService
+
+    path = Paths.get(filename)
+    path = path.getParent() if !path.toFile().isDirectory()
+
+    watcher = path.getFileSystem().newWatchService()
+    path.register(watcher,
+                  StandardWatchEventKinds::ENTRY_DELETE,
+                  StandardWatchEventKinds::ENTRY_MODIFY)
+
+    loop do
+      key = watcher.take()
+      break if !key.isValid()
+
+      action = lambda { |fn|
+        fn.call if handler
+      }
+      
+      key.pollEvents().each do |e|
+        case e.kind()
+        when StandardWatchEventKinds::ENTRY_CREATE
+          action.call(lambda {|h| h.file_modified})
+        when StandardWatchEventKinds::ENTRY_MODIFY
+          action.call(lambda {|h| h.file_modified})
+        when StandardWatchEventKinds::ENTRY_DELETE
+          action.call(lambda {|h| h.file_deleted; h.unbind })
+        end
+        
+      end
+
+      
+      key.reset()
+    end
+    
+  end
 
   class Connection
     def associate_callback_target sig
