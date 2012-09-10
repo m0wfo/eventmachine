@@ -22,8 +22,7 @@ class EmReactor
     @detached_connections = ArrayList.new
 
     @binding_index = 0
-    @loop_breaker = AtomicBoolean.new
-    @loop_breaker.set(false)
+    @loop_breaker = AtomicBoolean.new(false)
 
     @my_read_buffer = ByteBuffer.allocate(32*1024)
     @timer_quantum = 98
@@ -395,23 +394,41 @@ class EmReactor
   end
 
   def attach_channel(sc, watch_mode)
-    
+    b = create_binding
+
+    ec = EventableSocketChannel.new(sc, b, @my_selector)
+    ec.set_attached
+    ec.set_watch_only if watch_mode
+
+    @connections.put(b, ec)
+    @new_connections.add(b)
+
+    return b
   end
 
   def detach_channel(sig)
+    ec = @connections.get(sig)
+
+    if !ec.nil?
+      @unbound_connections.add(sig)
+      return ec.channel
+    end
   end
 
   def set_notify_readable(sig, mode)
+    @connections.get(sig).set_notify_readable(mode)
   end
 
   def set_notify_writable(sig, mode)
+    @connections.get(sig).set_notify_writable(mode)
   end
 
   def is_notify_readable(sig)
+    @connections.get(sig).is_notify_readable
   end
 
   def is_notify_writable(sig)
-    @connections.get(sig).is_notify_writable(true)
+    @connections.get(sig).is_notify_writable
   end
 
   def connection_count
