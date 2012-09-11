@@ -1,3 +1,12 @@
+java_import java.util.LinkedList
+java_import java.nio.channels.SelectionKey
+java_import java.net.InetSocketAddress
+java_import java.nio.channels.ClosedChannelException
+java_import java.lang.RuntimeException
+java_import java.io.IOException
+
+require 'packet'
+
 class EventableDatagramChannel
 
   def initialize(socket_channel, binding, selector)
@@ -12,17 +21,25 @@ class EventableDatagramChannel
   end
 
   def schedule_outbound_data(bb)
-    return if @close_scheduled || bb.remaining < 1
+    begin
+      return if @close_scheduled || bb.remaining < 1
 
-    @outbound_q.addLast(Packet.new(bb, @return_address))
-    @channel.register(@selector, SelectionKey::OP_WRITE | SelectionKey::OP_READ, self)
+      @outbound_q.addLast(Packet.new(bb, @return_address))
+      @channel.register(@selector, SelectionKey::OP_WRITE | SelectionKey::OP_READ, self)
+    rescue ChannelClosedException => e
+      raise RuntimeException.new("no outbound data")
+    end
   end
 
   def schedule_outbound_datagram(bb, addr, port)
-    return if @close_scheduled || bb.remaining < 1
+    begin
+      return if @close_scheduled || bb.remaining < 1
 
-    @outbound_q.addLast(Packet.new(bb, InetSocketAddress.new(addr, port)))
-    @channel.register(@selector, SelectionKey::OP_WRITE | SelectionKey::OP_READ, self)
+      @outbound_q.addLast(Packet.new(bb, InetSocketAddress.new(addr, port)))
+      @channel.register(@selector, SelectionKey::OP_WRITE | SelectionKey::OP_READ, self)
+    rescue ChannelClosedException => e
+      raise RuntimeException.new("no outbound data")
+    end
   end
 
   def schedule_close(after_writing)
@@ -31,11 +48,17 @@ class EventableDatagramChannel
   end
 
   def close
-    @channel.close
+    begin
+      @channel.close
+    rescue IOException => e
+    end
   end
 
   def read_inbound_data(bb)
-    @return_address = @channel.receive(bb)
+    begin
+      @return_address = @channel.receive(bb)
+    rescue IOException => e
+    end
   end
 
   def write_outbound_data
@@ -46,7 +69,7 @@ class EventableDatagramChannel
 
       begin
         written = @channel.write(packet.bb, packet.recipient)
-      rescue IOException e
+      rescue IOException => e
         return false
       end
 
@@ -66,12 +89,12 @@ class EventableDatagramChannel
     # todo
   end
 
-  def get_peername
+  def get_peer_name
     return if @return_address.nil?
     [@return_address.getPort, @return_address.getHostname]
   end
 
-  def get_sockname
+  def get_sock_name
     @socket ||= @channel.socket
     [@socket.getLocalPort, @socket.getLocalAddress.getHostAddress]
   end

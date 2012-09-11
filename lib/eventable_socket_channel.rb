@@ -1,3 +1,6 @@
+import java.util.LinkedList
+import java.nio.channels.SelectionKey
+
 class EventableSocketChannel
 
   attr_reader :binding, :channel, :watch_only, :notify_readable, :notify_writable
@@ -23,9 +26,9 @@ class EventableSocketChannel
   end
 
   def close
-    if @channel_key.nil?
+    if !@channel_key.nil?
       @channel_key.cancel
-      @chennal_key = nil
+      @channel_key = nil
     end
 
     if @attached
@@ -39,8 +42,8 @@ class EventableSocketChannel
         f.set(fd, -1)
 
         return
-      rescue NoSuchFieldException e
-      rescue IllegalAccessException e
+      rescue NoSuchFieldException => e
+      rescue IllegalAccessException => e
       end
     end
 
@@ -67,7 +70,9 @@ class EventableSocketChannel
   end
 
   def read_inbound_data(bb)
-    raise "eof" if @channel.read(bb) == -1
+    # TODO: do we really want to throw an IOException
+    # for such a commonplace event?
+    raise IOException.new("eof") if @channel.read(bb) == -1
   end
 
   def write_outbound_data
@@ -85,88 +90,86 @@ class EventableSocketChannel
 
     update_events if @outbound_q.isEmpty && !@close_scheduled
 
-    return !(@close_scheduled && @outbound_q.isEmpty)
+    return !(@close_scheduled || @outbound_q.isEmpty)
   end
 
-    def connect_pending=(is_pending)
-      @connect_pending = is_pending
-      update_events if is_pending
-    end
-
-    def finish_connecting
-      @channel.finishConnect
-
-      @connect_pending = false
-      update_events
-      return true
-    end
+  def connect_pending=(is_pending)
+    @connect_pending = is_pending
+    update_events if is_pending
   end
 
-    def schedule_close
-      @outbound_q.clear if !@after_writing
+  def finish_connecting
+    @channel.finishConnect
 
-      return true if @outbound_q.isEmpty
+    @connect_pending = false
+    update_events
+    return true
+  end
 
-      update_events
-      @close_scheduled = true
-      return false
-    end
+  def schedule_close
+    @outbound_q.clear if !@after_writing
+    return true if @outbound_q.isEmpty
 
-    def start_tls
-      # todo
-    end
+    update_events
+    @close_scheduled = true
+    return false
+  end
 
-    def comm_inactivity_timeout=(seconds)
-      # todo
-    end
+  def start_tls
+    raise "todo"
+  end
 
-    def get_peername
-      @socket ||= @channel.socket
-      [@socket.getPort, @socket.getInetAddress.getHostAddress]
-    end
+  def comm_inactivity_timeout=(seconds)
+    raise "todo"
+  end
 
-    def get_sockname
-      @socket ||= @channel.socket
-      [@socket.getLocalPort, @socket.getLocalAddress.getHostAddress]
-    end
+  def get_peer_name
+    @socket ||= @channel.socket
+    [@socket.getPort, @socket.getInetAddress.getHostAddress]
+  end
 
-    def watch_only=(only)
-      @watch_only = only
-      update_events if only
-    end
+  def get_sock_name
+    @socket ||= @channel.socket
+    [@socket.getLocalPort, @socket.getLocalAddress.getHostAddress]
+  end
 
-    def notify_readable=(readable)
-      @notify_readable = readable
-      update_events if readable
-    end
+  def watch_only=(only)
+    @watch_only = only
+    update_events if only
+  end
 
-    def notify_writable=(writable)
-      @notify_writable = writable
-      update_events if writable
-    end
+  def notify_readable=(readable)
+    @notify_readable = readable
+    update_events if readable
+  end
 
-    def update_events
-      return if @channel_key.nil?
-      events = current_events
-      @channel_key.interestOps(events) if @channel_key.interestOps != events
-    end
+  def notify_writable=(writable)
+    @notify_writable = writable
+    update_events if writable
+  end
 
-    def current_events
-      events = 0
+  def update_events
+    return if @channel_key.nil?
+    events = current_events
+    @channel_key.interestOps(events) if @channel_key.interestOps != events
+  end
 
-      if @watch_only
-        events += SelectionKey::OP_READ if @notify_readable
-        events += SelectionKey::OP_WRITE if @notify_writable
+  def current_events
+    events = 0
+
+    if @watch_only
+      events |= SelectionKey::OP_READ if @notify_readable
+      events |= SelectionKey::OP_WRITE if @notify_writable
+    else
+      if @connect_pending
+        events |= SelectionKey::OP_CONNECT
       else
-        if @connect_pending
-          events += SelectionKey::OP_CONNECT
-        else
-          events += SelectionKey::OP_READ
-          events += SelectionKey::OP_WRITE if !@outbound_q.isEmpty
-        end
+        events |= SelectionKey::OP_READ
+        events |= SelectionKey::OP_WRITE if !@outbound_q.isEmpty
       end
-
-      events
     end
+
+    events
+  end
   
 end

@@ -28,7 +28,11 @@
 # which is a garden-variety Ruby-extension glue module.
 
 require 'java'
-require 'rubyeventmachine'
+#require 'rubyeventmachine'
+require 'em_reactor'
+require 'eventable_socket_channel'
+require 'packet'
+require 'eventable_datagram_channel'
 require 'socket'
 
 java_import java.io.FileDescriptor
@@ -86,8 +90,8 @@ module EventMachine
 
   # This thunk class used to be called EM, but that caused conflicts with
   # the alias "EM" for module EventMachine. (FC, 20Jun08)
-  class JEM < com.rubyeventmachine.EmReactor
-    def eventCallback a1, a2, a3, a4
+  class JEM < EmReactor
+    def event_callback a1, a2, a3, a4=nil
       s = String.from_java_bytes(a3.array[a3.position...a3.limit]) if a3
       EventMachine::event_callback a1, a2, s || a4
       nil
@@ -105,7 +109,7 @@ module EventMachine
     @em = nil
   end
   def self.add_oneshot_timer interval
-    @em.installOneshotTimer interval
+    @em.install_oneshot_timer interval
   end
   def self.run_machine
     @em.run
@@ -114,48 +118,48 @@ module EventMachine
     @em.stop
   end
   def self.start_tcp_server server, port
-    @em.startTcpServer server, port
+    @em.start_tcp_server server, port
   end
   def self.stop_tcp_server sig
-    @em.stopTcpServer sig
+    @em.stop_tcp_server sig
   end
   def self.start_unix_server filename
     # TEMPORARILY unsupported until someone figures out how to do it.
     raise "unsupported on this platform"
   end
   def self.send_data sig, data, length
-    @em.sendData sig, data.to_java_bytes
+    @em.send_data sig, data.to_java_bytes
   end
   def self.send_datagram sig, data, length, address, port
-    @em.sendDatagram sig, data.to_java_bytes, length, address, port
+    @em.send_datagram sig, data.to_java_bytes, length, address, port
   end
   def self.connect_server server, port
     bind_connect_server nil, nil, server, port
   end
   def self.bind_connect_server bind_addr, bind_port, server, port
-    @em.connectTcpServer bind_addr, bind_port.to_i, server, port
+    @em.connect_tcp_server bind_addr, bind_port.to_i, server, port
   end
   def self.close_connection sig, after_writing
-    @em.closeConnection sig, after_writing
+    @em.close_connection sig, after_writing
   end
   def self.set_comm_inactivity_timeout sig, interval
-    @em.setCommInactivityTimeout sig, interval
+    @em.set_comm_inactivity_timeout sig, interval
   end
   def self.set_pending_connect_timeout sig, val
   end
   def self.set_heartbeat_interval val
   end
   def self.start_tls sig
-    @em.startTls sig
+    # @em.startTls sig
   end
   def self.ssl?
     false
   end
   def self.signal_loopbreak
-    @em.signalLoopbreak
+    @em.signal_loop_break
   end
   def self.set_timer_quantum q
-    @em.setTimerQuantum q
+    @em.timer_quantum = q
   end
   def self.epoll
     # Epoll is a no-op for Java.
@@ -177,7 +181,7 @@ module EventMachine
     # Currently a no-op for Java.
   end
   def self.open_udp_socket server, port
-    @em.openUdpSocket server, port
+    @em.open_udp_socket server, port
   end
   def self.invoke_popen cmd
     # TEMPORARILY unsupported until someone figures out how to do it.
@@ -199,12 +203,12 @@ module EventMachine
     :java
   end
   def self.get_peername sig
-    if peer = @em.getPeerName(sig)
+    if peer = @em.get_peer_name(sig)
       Socket.pack_sockaddr_in(*peer)
     end
   end
   def self.get_sockname sig
-    if sockName = @em.getSockName(sig)
+    if sockName = @em.get_sock_name(sig)
       Socket.pack_sockaddr_in(*sockName)
     end
   end
@@ -243,29 +247,29 @@ module EventMachine
       ch.set_field 'state', ch.get_field('ST_CONNECTED')
     end
 
-    @em.attachChannel(ch,watch_mode)
+    @em.attach_channel(ch,watch_mode)
   end
   def self.detach_fd sig
-    if ch = @em.detachChannel(sig)
+    if ch = @em.detach_channel(sig)
       ch.get_field 'fdVal'
     end
   end
 
   def self.set_notify_readable sig, mode
-    @em.setNotifyReadable(sig, mode)
+    @em.set_notify_readable(sig, mode)
   end
   def self.set_notify_writable sig, mode
-    @em.setNotifyWritable(sig, mode)
+    @em.set_notify_writable(sig, mode)
   end
 
   def self.is_notify_readable sig
-    @em.isNotifyReadable(sig)
+    @em.is_notify_readable(sig)
   end
   def self.is_notify_writable sig
-    @em.isNotifyWritable(sig)
+    @em.is_notify_writable(sig)
   end
   def self.get_connection_count
-    @em.getConnectionCount
+    @em.connection_count
   end
 
   def self.set_tls_parms(sig, params)

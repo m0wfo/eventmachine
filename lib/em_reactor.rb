@@ -1,3 +1,15 @@
+java_import java.util.TreeMap
+java_import java.util.HashMap
+java_import java.util.ArrayList
+java_import java.util.concurrent.atomic.AtomicBoolean
+java_import java.nio.ByteBuffer
+java_import java.nio.channels.ClosedChannelException
+java_import java.nio.channels.SelectionKey
+java_import java.nio.channels.Selector
+java_import java.nio.channels.ServerSocketChannel
+java_import java.io.IOException
+java_import java.net.InetSocketAddress
+
 class EmReactor
   
   EM_TIMER_FIRED = 100
@@ -15,7 +27,7 @@ class EmReactor
 
   def initialize
     @timers = TreeMap.new
-    @connection = HashMap.new
+    @connections = HashMap.new
     @acceptors = HashMap.new
     @new_connections = ArrayList.new
     @unbound_connections = ArrayList.new
@@ -36,16 +48,16 @@ class EmReactor
     begin
       @my_selector = Selector.open()
       @run_reactor = true
-    rescue (IOException e)
-      p 'err!'
+    rescue IOException => e
+      raise "Could not open selector"
     end
 
     while @run_reactor
       run_loop_breaks
-      break if !@b_run_reactor
+      break if !@run_reactor
 
       run_timers
-      break if !@b_run_reactor
+      break if !@run_reactor
 
       remove_unbound_connections
       check_io
@@ -57,17 +69,17 @@ class EmReactor
   end
 
   def add_new_connections
-    @unbound_connections.each do |ec|
+    @detached_connections.each do |ec|
       ec.cleanup()
     end
     @detached_connections.clear()
 
     @new_connections.each do |b|
       ec = @connections.get(b)
-      if ec.nil?
+      if !ec.nil?
         begin
-          ec.register()
-        rescue ClosedChannelException e
+          ec.register
+        rescue ClosedChannelException => e
           @unbound_connections.add(ec.getBinding())
         end
       end
@@ -79,11 +91,11 @@ class EmReactor
     @unbound_connections.each do |b|
       ec = @connections.remove(b)
 
-      if !ec
-        eventCallback(b, EM_CONNECTION_UNBOUND, nil)
-        ec.close()
+      if !ec.nil?
+        event_callback(b, EM_CONNECTION_UNBOUND, nil)
+        ec.close
 
-        if ec.nil? && ec.isAttached()
+        if !ec.nil? && ec.attached
           @detached_connections.add(ec)
         end
       end
@@ -97,7 +109,7 @@ class EmReactor
     if @new_connections.size() > 0
       timeout = -1
     elsif !@timers.isEmpty()
-      now = java.lang.Date.new.getTime()
+      now = java.util.Date.new.getTime()
       k = @timers.firstKey()
       diff = k-now
 
@@ -115,9 +127,9 @@ class EmReactor
         @my_selector.selectNow()
       else
         @my_selector.select(timeout)
-      rescue IOException e
-        e.printStackTrace
       end
+    rescue IOException => e
+      e.printStackTrace  
     end
   end
 
@@ -142,24 +154,24 @@ class EmReactor
   end
 
   def is_acceptable(key)
-    ss = key.channel()
+    ss = key.channel
 
     10.times do
       begin
-        sn = ss.accept()
+        sn = ss.accept
         break if sn.nil?
-      rescue IOException e
+      rescue IOException => e
         e.printStackTrace()
         key.cancel()
 
-        server = @acceptors.remove(key.attachment())
-        server.close() if !server.nil?
+        server = @acceptors.remove(key.attachment)
+        server.close if !server.nil?
         break
       end
 
       begin
         sn.configureBlocking(false)
-      rescue IOException e
+      rescue IOException => e
         e.printStackTrace()
         next
       end
@@ -169,24 +181,24 @@ class EmReactor
       @connections.put(b, ec)
       @new_connections.add(b)
 
-      event_callback(key.attachment().longValue(), EM_CONNECTION_ACCEPTED, nil, b)
+      event_callback(key.attachment, EM_CONNECTION_ACCEPTED, nil, b)
     end
   end
 
   def is_readable(key)
-    ec = key.attachment()
-    b = ec.getBinding()
+    ec = key.attachment
+    b = ec.binding
 
-    if ec.isWatchOnly()
-      event_callback(b, EM_CONNECTION_READ, @my_read_buffer) if ec.isNotifyReadable()
+    if ec.watch_only
+      event_callback(b, EM_CONNECTION_READ, @my_read_buffer) if ec.notify_readable
     else
-      @my_read_buffer.clear()
+      @my_read_buffer.clear
 
       begin
-        ec.readInboundData(@my_read_buffer)
-        @my_read_buffer.flip()
+        ec.read_inbound_data(@my_read_buffer)
+        @my_read_buffer.flip
         event_callback(b, EM_CONNECTION_READ, @my_read_buffer)
-      rescue IOException e
+      rescue IOException => e
         @unbound_connections.add(b)
       end
     end
@@ -194,47 +206,47 @@ class EmReactor
 
   def is_writable(key)
     ec = key.attachment()
-    b = ec.getBinding()
+    b = ec.binding
 
-    if ec.isWatchOnly()
-      event_callback(b, EM_CONNECTION_NOTIFY_WRITABLE, nil) if ec.isNotifyWritable()
+    if ec.watch_only
+      event_callback(b, EM_CONNECTION_NOTIFY_WRITABLE, nil) if ec.notify_writable
     else
       begin
-        @unbound_connections.add(b) if !ec.writeOutboundData()
-      rescue IOException e
+        @unbound_connections.add(b) if !ec.write_outbound_data
+      rescue IOException => e
         @unbound_connections.add(b)
       end
     end
   end
 
   def is_connectable(key)
-    ec = key.attachment()
-    b = ec.getBinding()
+    ec = key.attachment
+    b = ec.binding
 
     begin
-      if ec.finishConnecting()
+      if ec.finish_connecting
         event_callback(b, EM_CONNECTION_COMPLETED, nil)
       else
         @unbound_connections.add(b)
       end
-    rescue IOException e
+    rescue IOException => e
       @unbound_connections.add(b)
     end
   end
 
   def close
-    @my_selector.close() if !@my_selector.nil?
+    @my_selector.close if !@my_selector.nil?
 
-    @acceptors.each {|a| a.close() }
+    @acceptors.each {|a| a.close }
 
     conns = ArrayList.new
 
     @connections.each do |ec|
       conns.add(ec) if !ec.nil?
     end
-    @connections.clear()
+    @connections.clear
 
-    @conns.each do |ec|
+    conns.each do |ec|
       event_callback(ec.get_binding, EM_CONNECTION_UNBOUND, nil)
       ec.close
       @detached_connections.add(ec) if sc.is_attached
@@ -255,6 +267,7 @@ class EmReactor
 
   def run_timers
     now = java.util.Date.new.getTime
+
     while !@timers.isEmpty
       k = @timers.firstKey
       break if k > now
@@ -262,7 +275,7 @@ class EmReactor
       callbacks = @timers.get(k)
       @timers.remove(k)
 
-      callbacks.each { |cb| event_callback(0, EM_TIMER_FIRED, nil, cb.longValue) }
+      callbacks.each { |cb| event_callback(0, EM_TIMER_FIRED, nil, cb) }
     end
   end
 
@@ -277,13 +290,15 @@ class EmReactor
       callbacks.add(s)
       @timers.put(deadline, callbacks)
     end
+
+    s
   end
 
   def start_tcp_server(addr, port=nil)
-    if port.nil?
+    if !port.nil?
       addr = InetSocketAddress.new(addr, port)
     end
-    
+
     begin
       server = ServerSocketChannel.open
       server.configureBlocking(false)
@@ -292,7 +307,7 @@ class EmReactor
       @acceptors.put(s, server)
       server.register(@my_selector, SelectionKey::OP_ACCEPT, s)
       return s
-    rescue IOException e
+    rescue IOException => e
       raise err
     end
   end
@@ -348,12 +363,12 @@ class EmReactor
       if sc.connect(InetSocketAddress.new(addr, port))
         raise "immediate-connect unimplemented"
       else
-        ec.set_connect_pending
+        ec.connect_pending = true
         @connections.put(b, ec)
         @new_connections.add(b)
       end
-    rescue IOException e
-      p "immediate-connect unimplemented"
+    rescue IOException => e
+      raise "immediate-connect unimplemented"
     end
 
     return b
@@ -381,24 +396,26 @@ class EmReactor
   end
 
   def timer_quantum=(ms)
-    raise "err" if (ms < 5 || ms > 2500)
+    if (ms < 5 || ms > 2500)
+        raise "attempt to set invalid timer-quantum value: " + ms
+    end
     @timer_quantum = ms
   end
 
   def get_peer_name(sig)
-    @connections.get(sig).get_peername
+    @connections.get(sig).get_peer_name
   end
 
   def get_sock_name(sig)
-    @connections.get(sig).get_sockname
+    @connections.get(sig).get_sock_name
   end
 
   def attach_channel(sc, watch_mode)
     b = create_binding
 
     ec = EventableSocketChannel.new(sc, b, @my_selector)
-    ec.set_attached
-    ec.set_watch_only if watch_mode
+    ec.attached = true
+    ec.watch_only = true
 
     @connections.put(b, ec)
     @new_connections.add(b)
@@ -416,15 +433,15 @@ class EmReactor
   end
 
   def set_notify_readable(sig, mode)
-    @connections.get(sig).set_notify_readable(mode)
+    @connections.get(sig).notify_readable = mode
   end
 
   def set_notify_writable(sig, mode)
-    @connections.get(sig).set_notify_writable(mode)
+    @connections.get(sig).notify_writable = mode
   end
 
   def is_notify_readable(sig)
-    @connections.get(sig).is_notify_readable
+    @connections.get(sig).notify_readable
   end
 
   def is_notify_writable(sig)
@@ -432,7 +449,7 @@ class EmReactor
   end
 
   def connection_count
-    @connections.count() + @acceptors.size()
+    @connections.count + @acceptors.size
   end
   
 end
